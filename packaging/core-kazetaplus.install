@@ -1,0 +1,21 @@
+pre_install() {
+    if [[ ! -x /usr/bin/kazeta || ! -x /usr/bin/kazeta-session || ! -r /etc/greetd/config.toml ]]; then
+        echo 'ERROR: This does not appear to be an installed Kazeta+ system.' >&2
+        return 1
+    fi
+    if ! grep -q 'kazeta-plus/config\.toml' /usr/bin/kazeta 2>/dev/null && [[ ! -d /usr/share/kazeta-plus ]]; then
+        echo 'ERROR: Vanilla Kazeta detected. Install the kazeta package variant.' >&2
+        return 1
+    fi
+}
+
+post_install() {
+    /usr/lib/playfusion-cart-packs/integrate install kazetaplus &&
+        /usr/lib/playfusion-cart-packs/integrate check kazetaplus
+}
+
+post_upgrade() { post_install; }
+
+pre_remove() {
+    /usr/lib/playfusion-cart-packs/integrate restore || return 1
+}

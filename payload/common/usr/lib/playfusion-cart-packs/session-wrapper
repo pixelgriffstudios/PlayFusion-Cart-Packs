@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+readonly ORIGINAL_SESSION=/usr/bin/kazeta-session
+readonly UI=/usr/bin/playfusion-cart-ui
+readonly PROFILE_APPLY=/usr/bin/playfusion-profile-apply
+readonly LOOSE_HELPER=/usr/bin/playfusion-loose-media-helper
+readonly VISIBLE_CART=/run/media/playfusion-loose-rom
+readonly STATE_DIR=/run/playfusion-cart-packs/loose-media
+readonly OUTPUT="${XDG_RUNTIME_DIR:-/tmp}/playfusion-selected-cart"
+
+log() {
+    logger -t playfusion-cart-session -- "$*" 2>/dev/null || true
+    printf 'PlayFusion Cart Packs: %s\n' "$*" >&2
+}
+
+run_gamescope_ui() {
+    if command -v gamescope >/dev/null 2>&1; then
+        gamescope --filter pixel -- "$@"
+    else
+        "$@"
+    fi
+}
+
+# Profiles are deliberately fail-open: a damaged optional profile UI must not
+# prevent the original Kazeta session from starting.
+if [[ -x "$UI" && -x "$PROFILE_APPLY" ]]; then
+    if ! run_gamescope_ui "$UI" profiles; then
+        log "Profiles Lite UI exited with an error; keeping the previous profile."
+    fi
+    if ! "$PROFILE_APPLY" --apply-active; then
+        log "Profile activation failed; restoring the Default profile."
+        "$PROFILE_APPLY" --apply default >/dev/null 2>&1 || true
+    fi
+fi
+
+# The helper only creates metadata, symlinks and read-only bind mounts. It does
+# not copy ROM data. A failed scan simply falls through to normal Kazeta.
+if [[ -x "$LOOSE_HELPER" ]]; then
+    timeout 12s pkexec "$LOOSE_HELPER" settle >/dev/null 2>&1 ||
+        log "Loose-media scan was skipped or timed out."
+fi
+
+# Multi-ROM browsing is optional and only appears for a collection. Selecting
+# a card asks the privileged helper to expose exactly that cached virtual cart.
+if [[ -e /usr/lib/playfusion-cart-packs/features/multi-rom && -x "$UI" && -r "$STATE_DIR/count" ]] &&
+    [[ "$(cat "$STATE_DIR/count" 2>/dev/null || printf 0)" -gt 1 ]]; then
+    rm -f -- "$OUTPUT"
+    if run_gamescope_ui "$UI" browser --root "$VISIBLE_CART" --output "$OUTPUT" &&
+        [[ -s "$OUTPUT" ]]; then
+        selected_path=$(head -n 1 "$OUTPUT")
+        selected_id=$(basename -- "$(dirname -- "$selected_path")")
+        if ! timeout 8s pkexec "$LOOSE_HELPER" select "$selected_id" >/dev/null 2>&1; then
+            log "The selected virtual cart did not pass validation."
+            pkexec "$LOOSE_HELPER" remove >/dev/null 2>&1 || true
+        fi
+    else
+        pkexec "$LOOSE_HELPER" remove >/dev/null 2>&1 || true
+    fi
+    rm -f -- "$OUTPUT"
+fi
+
+if [[ ! -x "$ORIGINAL_SESSION" ]]; then
+    log "Original Kazeta session is missing: $ORIGINAL_SESSION"
+    exit 1
+fi
+
+exec "$ORIGINAL_SESSION" "$@"

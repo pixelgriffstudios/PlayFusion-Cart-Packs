@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly ROOT=${PLAYFUSION_TEST_ROOT:-}
+readonly STATE_ROOT="$ROOT/var/lib/playfusion-cart-packs"
+readonly BACKUP_ROOT=$STATE_ROOT/backups
+readonly GREETD_CONFIG="$ROOT/etc/greetd/config.toml"
+readonly WRAPPER="$ROOT/usr/lib/playfusion-cart-packs/session-wrapper"
+readonly KAZETA="$ROOT/usr/bin/kazeta"
+readonly ORIGINAL_SESSION="$ROOT/usr/bin/kazeta-session"
+readonly PLUS_SHARE="$ROOT/usr/share/kazeta-plus"
+readonly LOCK="$ROOT/run/lock/playfusion-cart-packs-integrate.lock"
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+log() { printf 'PlayFusion Cart Packs: %s\n' "$*"; }
+
+detect_edition() {
+    [[ -r "$KAZETA" ]] || die "/usr/bin/kazeta is missing"
+    if grep -q 'kazeta-plus/config\.toml' "$KAZETA" 2>/dev/null ||
+        [[ -d "$PLUS_SHARE" ]]; then
+        printf 'kazetaplus\n'
+    else
+        printf 'kazeta\n'
+    fi
+}
+
+install_integration() {
+    local expected=$1 actual temporary
+    actual=$(detect_edition)
+    [[ "$actual" == "$expected" ]] ||
+        die "this is the $expected build, but the installed system is $actual"
+    [[ -x "$ORIGINAL_SESSION" ]] || die "/usr/bin/kazeta-session is missing"
+    [[ -x "$WRAPPER" ]] || die "$WRAPPER is missing"
+    [[ -r "$GREETD_CONFIG" ]] || die "$GREETD_CONFIG is missing"
+
+    mkdir -p "$BACKUP_ROOT" "$(dirname "$LOCK")"
+    exec 9>"$LOCK"
+    flock -x 9
+
+    if grep -Eq '^[[:space:]]*command[[:space:]]*=[[:space:]]*"/usr/lib/playfusion-cart-packs/session-wrapper"[[:space:]]*$' "$GREETD_CONFIG"; then
+        printf '%s\n' "$actual" > "$STATE_ROOT/edition"
+        log "session integration is already active"
+        return 0
+    fi
+    grep -Eq '^[[:space:]]*command[[:space:]]*=[[:space:]]*"/usr/bin/kazeta-session"[[:space:]]*$' "$GREETD_CONFIG" ||
+        die "unsupported greetd command; no files were changed"
+
+    if [[ ! -e "$BACKUP_ROOT/greetd-config.toml.original" ]]; then
+        cp -a -- "$GREETD_CONFIG" "$BACKUP_ROOT/greetd-config.toml.original"
+        sha256sum "$BACKUP_ROOT/greetd-config.toml.original" \
+            > "$BACKUP_ROOT/greetd-config.toml.original.sha256"
+    fi
+
+    temporary=$(mktemp "${GREETD_CONFIG}.playfusion.XXXXXX")
+    trap 'rm -f -- "${temporary:-}"' RETURN
+    sed -E 's#^([[:space:]]*command[[:space:]]*=[[:space:]]*)"/usr/bin/kazeta-session"[[:space:]]*$#\1"/usr/lib/playfusion-cart-packs/session-wrapper"#' \
+        "$GREETD_CONFIG" > "$temporary"
+    grep -Eq '^[[:space:]]*command[[:space:]]*=[[:space:]]*"/usr/lib/playfusion-cart-packs/session-wrapper"[[:space:]]*$' "$temporary" ||
+        die "generated greetd configuration failed validation"
+    chown --reference="$GREETD_CONFIG" "$temporary"
+    chmod --reference="$GREETD_CONFIG" "$temporary"
+    mv -f -- "$temporary" "$GREETD_CONFIG"
+    printf '%s\n' "$actual" > "$STATE_ROOT/edition"
+    log "installed $actual session integration"
+}
+
+restore_integration() {
+    local temporary
+    mkdir -p "$BACKUP_ROOT" "$(dirname "$LOCK")"
+    exec 9>"$LOCK"
+    flock -x 9
+    [[ -r "$GREETD_CONFIG" ]] || return 0
+    if ! grep -Eq '^[[:space:]]*command[[:space:]]*=[[:space:]]*"/usr/lib/playfusion-cart-packs/session-wrapper"[[:space:]]*$' "$GREETD_CONFIG"; then
+        log "greetd is no longer managed by Cart Packs; leaving it untouched"
+        return 0
+    fi
+    [[ -r "$BACKUP_ROOT/greetd-config.toml.original" ]] ||
+        die "original greetd backup is missing; refusing an unsafe restore"
+    (cd "$BACKUP_ROOT" && sha256sum -c greetd-config.toml.original.sha256) >/dev/null ||
+        die "original greetd backup checksum failed"
+    temporary=$(mktemp "${GREETD_CONFIG}.restore.XXXXXX")
+    cp -a -- "$BACKUP_ROOT/greetd-config.toml.original" "$temporary"
+    mv -f -- "$temporary" "$GREETD_CONFIG"
+    log "restored the original Kazeta session configuration"
+}
+
+health_check() {
+    local expected=${1:-} actual
+    actual=$(detect_edition)
+    [[ -z "$expected" || "$expected" == "$actual" ]] || die "edition mismatch"
+    [[ -x "$WRAPPER" ]] || die "session wrapper is missing"
+    [[ -x "$ORIGINAL_SESSION" ]] || die "original session is missing"
+    grep -Eq '^[[:space:]]*command[[:space:]]*=[[:space:]]*"/usr/lib/playfusion-cart-packs/session-wrapper"[[:space:]]*$' "$GREETD_CONFIG" ||
+        die "greetd is not pointing to the wrapper"
+    bash -n "$WRAPPER"
+    log "health check passed for $actual"
+}
+
+case "${1:-}" in
+    install) [[ $# -eq 2 ]] || die "usage: $0 install {kazeta|kazetaplus}"; install_integration "$2" ;;
+    restore) restore_integration ;;
+    check) health_check "${2:-}" ;;
+    *) die "usage: $0 {install EDITION|restore|check [EDITION]}" ;;
+esac

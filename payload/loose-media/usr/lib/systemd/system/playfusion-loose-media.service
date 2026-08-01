@@ -1,0 +1,14 @@
+[Unit]
+Description=Publish recognized loose ROMs as temporary read-only Kazeta carts
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/playfusion-loose-media-helper settle
+TimeoutStartSec=20
+Nice=10
+IOSchedulingClass=idle
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/run/media/playfusion-loose-rom /run/playfusion-cart-packs /var/cache/playfusion-cart-packs /run/lock

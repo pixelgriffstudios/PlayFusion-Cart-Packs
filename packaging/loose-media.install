@@ -1,0 +1,17 @@
+post_install() {
+    systemctl daemon-reload || true
+    systemctl enable playfusion-loose-media.path || true
+    if systemctl is-system-running --quiet 2>/dev/null; then
+        systemctl start playfusion-loose-media.path || true
+        /usr/bin/playfusion-loose-media-helper settle >/dev/null 2>&1 || true
+    fi
+}
+
+post_upgrade() { post_install; }
+
+pre_remove() {
+    systemctl disable --now playfusion-loose-media.path >/dev/null 2>&1 || true
+    /usr/bin/playfusion-loose-media-helper remove >/dev/null 2>&1 || true
+}
+
+post_remove() { systemctl daemon-reload; }

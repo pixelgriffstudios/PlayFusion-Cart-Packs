@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch mounted removable media for loose game ROMs
+
+[Path]
+PathChanged=/run/media
+Unit=playfusion-loose-media.service
+MakeDirectory=true
+
+[Install]
+WantedBy=multi-user.target

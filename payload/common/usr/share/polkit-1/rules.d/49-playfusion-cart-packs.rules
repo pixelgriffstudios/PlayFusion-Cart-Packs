@@ -1,0 +1,10 @@
+polkit.addRule(function(action, subject) {
+    if (action.id != "org.freedesktop.policykit.exec" || !subject.isInGroup("wheel")) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var program = action.lookup("program");
+    if (program == "/usr/bin/playfusion-loose-media-helper") {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

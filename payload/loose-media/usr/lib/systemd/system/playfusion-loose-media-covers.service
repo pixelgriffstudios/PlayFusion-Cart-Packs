@@ -1,0 +1,14 @@
+[Unit]
+Description=Download optional cover metadata for removable ROM carts
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/playfusion-loose-media-helper covers
+TimeoutStartSec=180
+Nice=15
+IOSchedulingClass=idle
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/cache/playfusion-cart-packs /run/lock

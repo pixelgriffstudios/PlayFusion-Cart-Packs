@@ -1,0 +1,16 @@
+post_install() {
+    echo 'Profiles Lite will initialize safely at the next boot.'
+    echo 'No game content is stored by this package.'
+}
+
+pre_remove() {
+    if [[ -x /usr/bin/playfusion-profile-apply ]]; then
+        gamer_home=$(getent passwd gamer | cut -d: -f6)
+        [[ -n "$gamer_home" ]] || {
+            echo 'ERROR: gamer account not found; preserving profile data and refusing an unsafe removal.' >&2
+            return 1
+        }
+        runuser -u gamer -- env HOME="$gamer_home" \
+            /usr/bin/playfusion-profile-apply --restore || return 1
+    fi
+}
