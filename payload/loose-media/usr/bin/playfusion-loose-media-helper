@@ -4,6 +4,7 @@ set -Eeuo pipefail
 VISIBLE_CART=${PLAYFUSION_VISIBLE_CART:-/run/media/playfusion-loose-rom}
 CACHE_ROOT=${PLAYFUSION_ROM_CACHE:-/var/cache/playfusion-cart-packs/roms}
 STATE_DIR=${PLAYFUSION_ROM_STATE:-/run/playfusion-cart-packs/loose-media}
+READONLY_MEDIA_ROOT=${PLAYFUSION_READONLY_MEDIA_ROOT:-$STATE_DIR/media-ro}
 RUNTIME_ROOT=${PLAYFUSION_RUNTIME_ROOT:-/usr/share/kazeta/runtimes}
 UNKNOWN_ICON=${PLAYFUSION_UNKNOWN_ICON:-/usr/share/playfusion-cart-packs/unknown.png}
 LOCK_FILE=${PLAYFUSION_ROM_LOCK:-/run/lock/playfusion-loose-media.lock}
@@ -17,14 +18,50 @@ log() {
 
 safe_unmount() {
     if mountpoint -q "$VISIBLE_CART"; then
-        umount -- "$VISIBLE_CART"
+        umount -- "$VISIBLE_CART" || {
+            log "Virtual cart is busy; leaving it mounted"
+            return 1
+        }
     fi
     rmdir -- "$VISIBLE_CART" 2>/dev/null || true
 }
 
+unmount_readonly_media() {
+    local mount_dir
+    [[ -d "$READONLY_MEDIA_ROOT" ]] || return 0
+    while IFS= read -r -d '' mount_dir; do
+        if mountpoint -q "$mount_dir"; then
+            umount -- "$mount_dir" || {
+                log "Read-only media mirror is busy; preserving it"
+                return 1
+            }
+        fi
+        rmdir -- "$mount_dir" 2>/dev/null || true
+    done < <(find "$READONLY_MEDIA_ROOT" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+    rmdir -- "$READONLY_MEDIA_ROOT" 2>/dev/null || true
+}
+
 remove_virtual_cart() {
-    safe_unmount
+    safe_unmount || return 1
+    unmount_readonly_media || return 1
     rm -rf -- "$STATE_DIR"
+}
+
+readonly_media_mirror() {
+    local media_root=$1 resolved digest mount_dir
+    resolved=$(realpath -e -- "$media_root") || return 1
+    digest=$(printf '%s' "$resolved" | sha256sum | cut -c1-16)
+    mount_dir="$READONLY_MEDIA_ROOT/$digest"
+    mkdir -p "$mount_dir"
+    if ! mountpoint -q "$mount_dir"; then
+        mount --bind "$resolved" "$mount_dir" || return 1
+        if ! mount -o remount,bind,ro,nosuid,nodev "$mount_dir"; then
+            umount -- "$mount_dir" 2>/dev/null || true
+            rmdir -- "$mount_dir" 2>/dev/null || true
+            return 1
+        fi
+    fi
+    printf '%s\n' "$mount_dir"
 }
 
 read_hex() {
@@ -159,6 +196,23 @@ candidate_roots() {
         find "$root" -maxdepth 2 -type f -name '*.kzi' -print -quit 2>/dev/null | grep -q . && continue
         printf '%s\0' "$root"
     done
+}
+
+real_cart_present() {
+    local search_root
+    if [[ -n "${PLAYFUSION_TEST_ROOTS:-}" ]]; then
+        while IFS= read -r search_root; do
+            [[ -d "$search_root" ]] || continue
+            find "$search_root" -maxdepth 3 -type f -name '*.kzi' -print -quit 2>/dev/null | grep -q . && return 0
+        done < <(tr ':' '\n' <<< "$PLAYFUSION_TEST_ROOTS")
+        return 1
+    fi
+    for search_root in /run/media /media; do
+        [[ -d "$search_root" ]] || continue
+        find "$search_root" -maxdepth 5 -type f -name '*.kzi' \
+            ! -path "$VISIBLE_CART/*" -print -quit 2>/dev/null | grep -q . && return 0
+    done
+    return 1
 }
 
 is_companion_track() {
@@ -305,6 +359,7 @@ copy_unknown_icon() {
 create_cart() {
     local source=$1 media_root=$2 platform=$3 runtime=$4 relative=$5 destination_root=$6 default=${7:-false}
     local filename stem slug size digest cart_id cart_dir runtime_info runtime_kind runtime_path art extension cover=''
+    local mirror readonly_source runtime_relative
     filename=$(basename -- "$source")
     stem=${filename%.*}
     slug=$(slugify "$stem"); [[ -n "$slug" ]] || slug=game
@@ -321,14 +376,24 @@ create_cart() {
     runtime_info=$(resolve_runtime "$runtime" "$media_root" 2>/dev/null || true)
     [[ -n "$runtime_info" ]] || { log "Skipping $relative: runtime $runtime.kzr is missing"; return 1; }
     IFS=$'\t' read -r runtime_kind runtime_path <<< "$runtime_info"
+    mirror=$(readonly_media_mirror "$media_root") || {
+        log "Skipping $relative: could not create a read-only media mirror"
+        return 1
+    }
+    readonly_source="$mirror/$relative"
+    [[ -r "$readonly_source" ]] || return 1
 
     rm -rf -- "$cart_dir"
     mkdir -p "$cart_dir"
-    ln -s -- "$(dirname -- "$source")" "$cart_dir/game"
-    if [[ "$runtime_kind" == media ]]; then ln -s -- "$runtime_path" "$cart_dir/$runtime.kzr"; fi
+    ln -s -- "$(dirname -- "$readonly_source")" "$cart_dir/game"
+    if [[ "$runtime_kind" == media ]]; then
+        runtime_relative=${runtime_path#"$media_root"/}
+        [[ "$runtime_relative" != "$runtime_path" && -r "$mirror/$runtime_relative" ]] || return 1
+        ln -s -- "$mirror/$runtime_relative" "$cart_dir/$runtime.kzr"
+    fi
     copy_unknown_icon "$cart_dir/icon.png"
     for extension in png jpg jpeg; do
-        art="$(dirname -- "$source")/$stem.$extension"
+        art="$(dirname -- "$readonly_source")/$stem.$extension"
         if [[ -s "$art" ]]; then
             ln -s -- "$art" "$cart_dir/cover.$extension"
             cover="cover.$extension"
@@ -392,11 +457,17 @@ publish_collection() {
 
 scan_media() {
     local manifest count prior
+    if real_cart_present; then
+        remove_virtual_cart || return 1
+        log 'A real Kazeta cartridge is present; loose-ROM publishing is paused'
+        return 0
+    fi
     manifest=$(find_roms || true)
     if [[ -z "$manifest" ]]; then remove_virtual_cart; return 1; fi
     prior=$(cat "$STATE_DIR/manifest" 2>/dev/null || true)
     if [[ "$manifest" == "$prior" ]] && mountpoint -q "$VISIBLE_CART"; then return 0; fi
     count=$(printf '%s\n' "$manifest" | sed '/^[[:space:]]*$/d' | wc -l)
+    remove_virtual_cart || return 1
     mkdir -p "$CACHE_ROOT" "$STATE_DIR"
     if [[ $count -eq 1 ]]; then
         publish_single "$manifest"
