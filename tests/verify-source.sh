@@ -27,14 +27,14 @@ chmod +x "$root/usr/bin/kazeta" "$root/usr/bin/kazeta-session" "$root/usr/lib/pl
 printf '[initial_session]\ncommand = "/usr/bin/kazeta-session"\n' > "$root/etc/greetd/config.toml"
 cp "$root/etc/greetd/config.toml" "$tmp/original.toml"
 
-PLAYFUSION_TEST_ROOT="$root" "$integrate" install kazeta
+PLAYFUSION_TEST_ROOT="$root" bash "$integrate" install kazeta
 grep -qx 'command = "/usr/lib/playfusion-cart-packs/session-wrapper"' "$root/etc/greetd/config.toml"
-PLAYFUSION_TEST_ROOT="$root" "$integrate" check kazeta
-PLAYFUSION_TEST_ROOT="$root" "$integrate" restore
+PLAYFUSION_TEST_ROOT="$root" bash "$integrate" check kazeta
+PLAYFUSION_TEST_ROOT="$root" bash "$integrate" restore
 cmp "$tmp/original.toml" "$root/etc/greetd/config.toml"
 
 mkdir -p "$root/usr/share/kazeta-plus"
-if PLAYFUSION_TEST_ROOT="$root" "$integrate" install kazeta >/dev/null 2>&1; then
+if PLAYFUSION_TEST_ROOT="$root" bash "$integrate" install kazeta >/dev/null 2>&1; then
     echo 'edition mismatch was not rejected' >&2
     exit 1
 fi
@@ -46,14 +46,14 @@ if [[ -z "${MSYSTEM:-}" ]]; then
     mkdir -p "$home/.local/share/kazeta/saves/default" "$state"
     printf original > "$home/.local/share/kazeta/saves/default/original.sav"
     printf kazeta > "$state/edition"
-    PLAYFUSION_HOME="$home" PLAYFUSION_STATE_ROOT="$state" "$profiles" --apply profile-1
+    PLAYFUSION_HOME="$home" PLAYFUSION_STATE_ROOT="$state" bash "$profiles" --apply profile-1
     [[ -L "$home/.local/share/kazeta/saves/default" ]]
     [[ -f "$home/.local/share/playfusion-cart-packs/slots/default/saves/original.sav" ]]
     printf profile1 > "$home/.local/share/kazeta/saves/default/profile-1.sav"
-    PLAYFUSION_HOME="$home" PLAYFUSION_STATE_ROOT="$state" "$profiles" --apply default
+    PLAYFUSION_HOME="$home" PLAYFUSION_STATE_ROOT="$state" bash "$profiles" --apply default
     [[ -f "$home/.local/share/kazeta/saves/default/original.sav" ]]
     [[ -f "$home/.local/share/playfusion-cart-packs/slots/profile-1/saves/profile-1.sav" ]]
-    PLAYFUSION_HOME="$home" PLAYFUSION_STATE_ROOT="$state" "$profiles" --restore
+    PLAYFUSION_HOME="$home" PLAYFUSION_STATE_ROOT="$state" bash "$profiles" --restore
     [[ -d "$home/.local/share/kazeta/saves/default" && ! -L "$home/.local/share/kazeta/saves/default" ]]
     [[ -f "$home/.local/share/kazeta/saves/default/original.sav" ]]
 else
@@ -64,6 +64,6 @@ romroot="$tmp/roms"
 mkdir -p "$romroot"
 printf '\x4e\x45\x53\x1aTEST' > "$romroot/Test Game.nes"
 PLAYFUSION_TEST_ROOTS="$romroot" PLAYFUSION_ROM_LOCK="$tmp/rom.lock" \
-    "$loose" probe "$romroot/Test Game.nes" | grep -qx $'nes\tnes-1.0'
+    bash "$loose" probe "$romroot/Test Game.nes" | grep -qx $'nes\tnes-1.0'
 
 echo 'source safety tests passed'
