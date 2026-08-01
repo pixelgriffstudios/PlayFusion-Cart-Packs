@@ -66,4 +66,16 @@ printf '\x4e\x45\x53\x1aTEST' > "$romroot/Test Game.nes"
 PLAYFUSION_TEST_ROOTS="$romroot" PLAYFUSION_ROM_LOCK="$tmp/rom.lock" \
     bash "$loose" probe "$romroot/Test Game.nes" | grep -qx $'nes\tnes-1.0'
 
+printf 'Id=real-cart\nExec=game/run\nIcon=icon.png\n' > "$romroot/real.kzi"
+before=$(sha256sum "$romroot/real.kzi" "$romroot/Test Game.nes")
+PLAYFUSION_TEST_ROOTS="$romroot" \
+PLAYFUSION_VISIBLE_CART="$tmp/visible-cart" \
+PLAYFUSION_ROM_CACHE="$tmp/cache" \
+PLAYFUSION_ROM_STATE="$tmp/rom-state" \
+PLAYFUSION_READONLY_MEDIA_ROOT="$tmp/rom-state/media-ro" \
+PLAYFUSION_ROM_LOCK="$tmp/rom.lock" \
+    bash "$loose" scan >/dev/null
+after=$(sha256sum "$romroot/real.kzi" "$romroot/Test Game.nes")
+[[ "$before" == "$after" && ! -e "$tmp/visible-cart" ]]
+
 echo 'source safety tests passed'
