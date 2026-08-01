@@ -28,7 +28,10 @@ for edition in kazeta kazetaplus; do
     bsdtar -tf "$core" | grep -qx 'usr/bin/playfusion-cart-ui'
     bsdtar -tf "$core" | grep -qx 'usr/lib/playfusion-cart-packs/session-wrapper'
     bsdtar -tf "$core" | grep -qx 'usr/lib/playfusion-cart-packs/integrate'
-    ! bsdtar -tf "$core" | grep -Eq '(^|/)usr/bin/kazeta$|(^|/)usr/bin/kazeta-session$'
+    if bsdtar -tf "$core" | grep -Eq '(^|/)usr/bin/kazeta$|(^|/)usr/bin/kazeta-session$'; then
+        echo "$core replaces a protected Kazeta executable" >&2
+        exit 1
+    fi
 
     loose=$(package_for "playfusion-loose-media-$edition")
     bsdtar -tf "$loose" | grep -qx 'usr/bin/playfusion-loose-media-helper'
@@ -44,10 +47,10 @@ bsdtar -xf "$(package_for playfusion-cart-core-kazeta)" -C "$extract_root"
 test -x "$extract_root/usr/bin/playfusion-cart-ui"
 test -x "$extract_root/usr/lib/playfusion-cart-packs/session-wrapper"
 test -x "$extract_root/usr/lib/playfusion-cart-packs/integrate"
-rm -rf -- "$extract_root"/*
+rm -rf -- "${extract_root:?}/"*
 bsdtar -xf "$(package_for playfusion-profiles-lite-kazeta)" -C "$extract_root"
 test -x "$extract_root/usr/bin/playfusion-profile-apply"
-rm -rf -- "$extract_root"/*
+rm -rf -- "${extract_root:?}/"*
 bsdtar -xf "$(package_for playfusion-loose-media-kazeta)" -C "$extract_root"
 test -x "$extract_root/usr/bin/playfusion-loose-media-helper"
 
