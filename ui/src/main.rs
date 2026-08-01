@@ -473,6 +473,6 @@ async fn main() {
             let output = args.iter().position(|arg| arg == "--output").and_then(|i| args.get(i + 1)).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp/playfusion-selected-cart"));
             browser_ui(root, output).await;
         }
-        _ => eprintln!("Usage: playfusion-cart-ui {profiles|browser --root DIR --output FILE}"),
+        _ => eprintln!("Usage: playfusion-cart-ui {{profiles|browser --root DIR --output FILE}}"),
     }
 }
