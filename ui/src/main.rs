@@ -1,6 +1,6 @@
 use gilrs::{Axis, Button, EventType, Gilrs};
 use macroquad::prelude::*;
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use std::env;
 use std::fs;
 use std::io;
@@ -327,8 +327,8 @@ async fn profile_ui() {
             let y = 175.0;
             panel(x, y, card_w, 330.0, index == selected);
             if let Some(profile) = profiles.get(index) {
-                if !avatars.contains_key(&profile.avatar) {
-                    if let Some(texture) = load_avatar(profile.avatar).await { avatars.insert(profile.avatar, texture); }
+                if let Entry::Vacant(entry) = avatars.entry(profile.avatar) {
+                    if let Some(texture) = load_avatar(profile.avatar).await { entry.insert(texture); }
                 }
                 if let Some(texture) = avatars.get(&profile.avatar) {
                     draw_texture_ex(texture, x + 37.0, y + 35.0, WHITE, DrawTextureParams { dest_size: Some(vec2(176.0, 176.0)), ..Default::default() });
@@ -434,14 +434,14 @@ async fn browser_ui(root: PathBuf, output: PathBuf) {
         let gap_x = 22.0;
         let gap_y = 24.0;
         let start_x = (screen_width() - (columns as f32 * card_w + (columns - 1) as f32 * gap_x)) / 2.0;
-        for index in start..end {
+        for (index, cart) in carts.iter().enumerate().take(end).skip(start) {
             let local = index - start;
             let col = local % columns;
             let row = local / columns;
             let x = start_x + col as f32 * (card_w + gap_x);
             let y = 120.0 + row as f32 * (card_h + gap_y);
             panel(x, y, card_w, card_h, index == selected);
-            let art = carts[index].artwork.clone();
+            let art = cart.artwork.clone();
             if !textures.contains_key(&art) {
                 if let Ok(texture) = load_texture(art.to_string_lossy().as_ref()).await { textures.insert(art.clone(), texture); }
             }
@@ -450,11 +450,11 @@ async fn browser_ui(root: PathBuf, output: PathBuf) {
                 let (w, h) = if ratio > 1.0 { (136.0, 136.0 / ratio) } else { (136.0 * ratio, 136.0) };
                 draw_texture_ex(texture, x + (card_w - w) / 2.0, y + 14.0 + (136.0 - h) / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
             }
-            let mut title = carts[index].name.clone();
+            let mut title = cart.name.clone();
             if title.chars().count() > 28 { title = format!("{}…", title.chars().take(27).collect::<String>()); }
             centered_card(&title, x, y + 178.0, card_w, 22.0, WHITE);
-            centered_card(&format!("{}  •  {}", carts[index].system.to_uppercase(), carts[index].runtime), x, y + 207.0, card_w, 16.0, Color::new(0.35, 0.85, 1.0, 1.0));
-            let source = if carts[index].source.is_empty() { "REMOVABLE MEDIA" } else { &carts[index].source };
+            centered_card(&format!("{}  •  {}", cart.system.to_uppercase(), cart.runtime), x, y + 207.0, card_w, 16.0, Color::new(0.35, 0.85, 1.0, 1.0));
+            let source = if cart.source.is_empty() { "REMOVABLE MEDIA" } else { &cart.source };
             let short_source = if source.chars().count() > 34 { format!("{}…", source.chars().take(33).collect::<String>()) } else { source.to_string() };
             centered_card(&short_source, x, y + 229.0, card_w, 14.0, GRAY);
         }
